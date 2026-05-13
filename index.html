@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>スロット期待値アシスト</title>
+  <style>
+    :root {
+      --bg: #0f172a; --card:#111827; --card2:#1f2937; --text:#f8fafc; --muted:#94a3b8;
+      --line:#334155; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at top,#1e293b 0,var(--bg) 45%);color:var(--text);padding:16px}.app{max-width:980px;margin:0 auto}h1{font-size:24px;margin:8px 0 4px}.sub{color:var(--muted);font-size:13px;margin-bottom:16px}.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}.tabBtn,button{border:1px solid var(--line);background:var(--card2);color:var(--text);padding:11px 10px;border-radius:12px;font-weight:700;cursor:pointer}.tabBtn.active,.btnPrimary{background:linear-gradient(135deg,#0ea5e9,#7c3aed);border-color:transparent}.card{background:rgba(17,24,39,.92);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:14px;box-shadow:0 12px 34px rgba(0,0,0,.22)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px 2px}input,select,textarea{width:100%;background:#020617;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:11px;font-size:15px}textarea{min-height:220px;resize:vertical}.result{border-radius:18px;padding:16px;background:#020617;border:1px solid var(--line)}.rank{font-size:32px;font-weight:900;line-height:1}.rank.good{color:var(--good)}.rank.warn{color:var(--warn)}.rank.bad{color:var(--bad)}.ev{font-size:22px;margin-top:6px;font-weight:800}.comment{color:#dbeafe;margin-top:10px;line-height:1.55}.small{color:var(--muted);font-size:12px;line-height:1.55}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.pill{padding:6px 10px;border-radius:999px;background:#0f172a;border:1px solid var(--line);font-size:12px;color:#cbd5e1}.hidden{display:none}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:9px 6px;text-align:left}th{color:var(--muted);font-weight:700}.right{text-align:right}.danger{color:var(--bad)}.positive{color:var(--good)}.btnDanger{background:#7f1d1d;border-color:#991b1b}.btnMini{padding:7px 9px;border-radius:10px;font-size:12px}.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#020617;border:1px solid var(--line);padding:10px 14px;border-radius:999px;color:var(--text);display:none}@media(max-width:720px){body{padding:10px}.tabs{grid-template-columns:repeat(2,1fr)}.grid,.grid3{grid-template-columns:1fr}h1{font-size:21px}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <h1>スロット期待値アシスト</h1>
+  <div class="sub">据え置き店向け。等価交換前提で、当日G・宵越しG・天井短縮を判定する簡易アプリ。</div>
+
+  <div class="tabs">
+    <button class="tabBtn active" data-tab="judge">判定する</button>
+    <button class="tabBtn" data-tab="history">稼働履歴</button>
+    <button class="tabBtn" data-tab="machine">機種データ</button>
+    <button class="tabBtn" data-tab="settings">設定</button>
+  </div>
+
+  <section id="judge" class="tab">
+    <div class="card">
+      <div class="grid">
+        <div><label>機種</label><select id="machineSelect"></select></div>
+        <div><label>狙い状態</label><select id="stateSelect"></select></div>
+        <div><label>当日現在G</label><input id="currentGame" type="number" inputmode="numeric" placeholder="例: 240"></div>
+        <div><label>前日最終G（宵越し用）</label><input id="prevGame" type="number" inputmode="numeric" placeholder="例: 380 / 不明なら空欄"></div>
+        <div><label>計算モード</label><select id="carryoverMode"><option value="today">当日Gのみ</option><option value="carry">宵越し 前日+当日</option></select></div>
+        <div><label>液晶G/データランプ補正</label><select id="lampMode"><option value="normal">そのまま計算</option><option value="safe">データランプのみ・安全寄り</option></select></div>
+      </div>
+      <div style="margin-top:12px" class="row">
+        <button class="btnPrimary" onclick="judgeEV()">期待値判定</button>
+        <button onclick="saveCandidate()">候補として保存</button>
+        <button onclick="saveEarnedEV()">稼いだ期待値として記録</button>
+      </div>
+    </div>
+
+    <div class="card result" id="resultBox">
+      <div class="rank warn">判定待ち</div>
+      <div class="ev">ゲーム数を入れて判定してください</div>
+      <div class="comment">据え置き宵越しは「前日最終G + 当日現在G」で計算します。あべしや内部ptが見えない時は安全寄り判定にできます。</div>
+    </div>
+
+    <div class="card"><h3>現在の機種メモ</h3><div id="machineMemo" class="small"></div></div>
+  </section>
+
+  <section id="history" class="tab hidden">
+    <div class="card">
+      <h3>稼働入力</h3>
+      <div class="grid3">
+        <div><label>機種名</label><input id="playMachine"></div>
+        <div><label>開始G</label><input id="startG" type="number"></div>
+        <div><label>終了G</label><input id="endG" type="number"></div>
+        <div><label>投資 円</label><input id="investYen" type="number"></div>
+        <div><label>回収 円</label><input id="returnYen" type="number"></div>
+        <div><label>メモ</label><input id="playMemo"></div>
+      </div>
+      <div style="margin-top:12px" class="row"><button class="btnPrimary" onclick="addHistory()">履歴追加</button><button onclick="exportData()">JSON書き出し</button><button onclick="document.getElementById('importFile').click()">JSON読み込み</button><input id="importFile" type="file" accept="application/json" class="hidden" onchange="importData(event)"></div>
+    </div>
+    <div class="card"><h3>累計</h3><div id="summary" class="row"></div><div id="evSummary" class="small" style="margin-top:10px"></div></div>
+    <div class="card"><h3>履歴</h3><div id="historyTable"></div></div>
+  </section>
+
+  <section id="machine" class="tab hidden">
+    <div class="card">
+      <h3>機種データ編集</h3>
+      <div class="small">JSONを直接編集できます。evTableはゲーム数と等価期待値円の対応表です。期待値表をもらったらここに反映します。</div>
+      <textarea id="machineJson"></textarea>
+      <div style="margin-top:12px" class="row"><button class="btnPrimary" onclick="saveMachineJson()">保存</button><button onclick="resetMachines()">初期データに戻す</button></div>
+    </div>
+  </section>
+
+  <section id="settings" class="tab hidden">
+    <div class="card">
+      <h3>判定基準</h3>
+      <div class="grid">
+        <div><label>Sランク期待値 円以上</label><input id="sLine" type="number" value="3000"></div>
+        <div><label>Aランク期待値 円以上</label><input id="aLine" type="number" value="1500"></div>
+        <div><label>Bランク期待値 円以上</label><input id="bLine" type="number" value="500"></div>
+        <div><label>平均投資 警戒ライン 円</label><input id="riskLine" type="number" value="15000"></div>
+      </div>
+      <div style="margin-top:12px" class="row"><button class="btnPrimary" onclick="saveSettings()">保存</button></div>
+    </div>
+    <div class="card small">注意：このアプリは期待値稼働の補助用です。等価交換前提です。天井短縮条件・閉店時間・前任者のヤメ方は必ず確認してください。</div>
+  </section>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+const defaultMachines = [
+  {
+    id:"karakuri_circus",
+    name:"スマスロ からくりサーカス",
+    unit:"ゲーム数",
+    avgInvestBase:17000,
+    memo:"からくりサーカス用。ゲーム数天井狙い。非常に荒い機種のため深め推奨。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:450},border:{ok:300,plus:300,strong:450},evTable:[{g:0,ev:-1920},{g:50,ev:-1640},{g:100,ev:-1338},{g:150,ev:-1014},{g:200,ev:-664},{g:250,ev:-288},{g:300,ev:117},{g:350,ev:553},{g:400,ev:1022},{g:450,ev:1527},{g:500,ev:2070},{g:550,ev:2655},{g:600,ev:3285},{g:650,ev:3963},{g:700,ev:4692},{g:750,ev:5477},{g:800,ev:6322},{g:850,ev:7232},{g:900,ev:8211},{g:950,ev:9265},{g:1000,ev:10399},{g:1050,ev:11620},{g:1100,ev:13043},{g:1150,ev:14405}],note:"ゲーム数天井狙い。300Gから理論上プラスだが、非常に荒いため実戦では450G〜推奨。なるべく深いG数を狙いたい。"}
+    ]
+  },
+  {
+    id:"iza_bancho",
+    name:"Lいざ！番長",
+    unit:"ゲーム数",
+    avgInvestBase:14000,
+    memo:"いざ！番長用。通常時と上位AT終了後の天井短縮を分離。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"天井短縮なし",aim:{equiv:500},border:{ok:400,plus:400,strong:500},evTable:[{g:0,ev:-1863},{g:50,ev:-1702},{g:100,ev:-1522},{g:150,ev:-1319},{g:200,ev:-1091},{g:250,ev:-834},{g:300,ev:-546},{g:350,ev:-222},{g:400,ev:142},{g:450,ev:551},{g:500,ev:1011},{g:550,ev:1528},{g:600,ev:2109},{g:650,ev:2763},{g:700,ev:3497},{g:750,ev:4322},{g:800,ev:5249},{g:850,ev:6291},{g:900,ev:7463},{g:950,ev:8779}],note:"天井短縮なし時。等価では500G〜が実戦ライン。400Gから一応プラス。"},
+      {id:"upper_short",name:"上位AT終了後・天井短縮",aim:{equiv:250},border:{ok:200,plus:200,strong:250},evTable:[{g:0,ev:-1555},{g:50,ev:-1147},{g:100,ev:-688},{g:150,ev:-172},{g:200,ev:407},{g:250,ev:1059},{g:300,ev:1791},{g:350,ev:2614},{g:400,ev:3540},{g:450,ev:4579},{g:500,ev:5748},{g:550,ev:7062}],note:"上位AT終了後の天井短縮状態。等価では250G〜が実戦ライン。200Gから一応プラス。"}
+    ]
+  },
+  {
+    id:"enen_fireforce_medal",
+    name:"S 炎炎ノ消防隊",
+    unit:"ゲーム数",
+    avgInvestBase:10000,
+    memo:"炎炎ノ消防隊メダル機用。ボーナス間ゲーム数天井狙い（天井短縮なし）。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件・天井短縮なし",aim:{equiv:400},border:{ok:200,plus:200,strong:400},evTable:[{g:0,ev:-500},{g:50,ev:-396},{g:100,ev:-273},{g:150,ev:-129},{g:200,ev:39},{g:250,ev:238},{g:300,ev:471},{g:350,ev:745},{g:400,ev:1066},{g:450,ev:1444},{g:500,ev:1887},{g:550,ev:2409},{g:600,ev:3021},{g:650,ev:3740},{g:700,ev:4584},{g:750,ev:5576},{g:800,ev:6741}],note:"天井短縮なし時。等価では200Gから理論上プラス。実戦では400G〜推奨。"}
+    ]
+  },
+  {
+    id:"enen_fireforce2",
+    name:"スマスロ 炎炎ノ消防隊2",
+    unit:"ゲーム数",
+    avgInvestBase:12000,
+    memo:"炎炎ノ消防隊2用。ボーナス間天井狙い。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:500},border:{ok:350,plus:350,strong:500},evTable:[{g:0,ev:-868},{g:50,ev:-783},{g:100,ev:-682},{g:150,ev:-561},{g:200,ev:-418},{g:250,ev:-247},{g:300,ev:-44},{g:350,ev:198},{g:400,ev:487},{g:450,ev:830},{g:500,ev:1239},{g:550,ev:1726},{g:600,ev:2306},{g:650,ev:2996},{g:700,ev:3818},{g:750,ev:4798},{g:800,ev:5963}],note:"通常条件のボーナス間天井狙い。等価では500G〜が期待値1000円超え。350Gから一応プラス。"}
+    ]
+  },
+  {
+    id:"chibariyo2",
+    name:"Lチバリヨ2",
+    unit:"ゲーム数",
+    avgInvestBase:13000,
+    memo:"チバリヨ2用。ゲーム数天井狙い。沖スロ系で荒れやすいため深め推奨。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:500},border:{ok:300,plus:300,strong:500},evTable:[{g:0,ev:-820},{g:50,ev:-717},{g:100,ev:-598},{g:150,ev:-460},{g:200,ev:-301},{g:250,ev:-118},{g:300,ev:94},{g:350,ev:339},{g:400,ev:622},{g:450,ev:948},{g:500,ev:1326},{g:550,ev:1761},{g:600,ev:2264},{g:650,ev:2846},{g:700,ev:3517},{g:750,ev:4292},{g:800,ev:5187},{g:850,ev:6221},{g:900,ev:7416},{g:950,ev:8795}],note:"ゲーム数天井狙い。等価では500G〜が実戦ライン。300Gから一応プラスだが、沖スロ系のため深め推奨。"}
+    ]
+  },
+  {
+    id:"ghost_in_the_shell",
+    name:"スマスロ 攻殻機動隊",
+    unit:"ゲーム数",
+    avgInvestBase:11500,
+    memo:"攻殻機動隊用。AT間天井狙い。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:450},border:{ok:250,plus:250,strong:450},evTable:[{g:0,ev:-580},{g:50,ev:-477},{g:100,ev:-359},{g:150,ev:-223},{g:200,ev:-67},{g:250,ev:113},{g:300,ev:320},{g:350,ev:558},{g:400,ev:832},{g:450,ev:1147},{g:500,ev:1509},{g:550,ev:1925},{g:600,ev:2404},{g:650,ev:2954},{g:700,ev:3587},{g:750,ev:4316},{g:800,ev:5153},{g:850,ev:6116},{g:900,ev:7223},{g:950,ev:8496}],note:"通常のAT間天井期待値。等価では450G〜が期待値1000円超え。250Gから一応プラス。"}
+    ]
+  },
+  {
+    id:"monster_hunter_iceborne",
+    name:"スマスロ モンスターハンター アイスボーン",
+    unit:"ゲーム数",
+    avgInvestBase:12000,
+    memo:"モンハンアイスボーン用。ゲーム数天井狙い。クエストモード・ぷちBINGOは平均値として考慮済み。天井短縮は未考慮。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:500},border:{ok:250,plus:250,strong:500},evTable:[{g:0,ev:-573},{g:50,ev:-457},{g:100,ev:-326},{g:150,ev:-178},{g:200,ev:-9},{g:250,ev:181},{g:300,ev:396},{g:350,ev:639},{g:400,ev:914},{g:450,ev:1226},{g:500,ev:1578},{g:550,ev:1977},{g:600,ev:2428},{g:650,ev:2938},{g:700,ev:3516},{g:750,ev:4169},{g:800,ev:4908},{g:850,ev:5744},{g:900,ev:6690},{g:950,ev:7760}],note:"等価では250Gから理論上プラス。実戦では500G〜推奨。クエストモード・ぷちBINGOは平均値として考慮済み。"}
+    ]
+  },
+  {
+    id:"shin_onimusha2",
+    name:"スマスロ 新鬼武者2",
+    unit:"サブ液晶ゲーム数",
+    avgInvestBase:11000,
+    memo:"新鬼武者2用。AT天井狙い。データカウンターではなくサブ液晶のゲーム数を基準にすること。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:400},border:{ok:200,plus:200,strong:400},evTable:[{g:0,ev:-691},{g:50,ev:-531},{g:100,ev:-354},{g:150,ev:-156},{g:200,ev:66},{g:250,ev:313},{g:300,ev:588},{g:350,ev:896},{g:400,ev:1239},{g:450,ev:1622},{g:500,ev:2049},{g:550,ev:2526},{g:600,ev:3059},{g:650,ev:3653},{g:700,ev:4316},{g:750,ev:5056},{g:800,ev:5882},{g:850,ev:6804},{g:900,ev:7833},{g:950,ev:8981}],note:"等価では200Gから理論上プラスだが、実戦では400G〜推奨。CZ間やCZスルー回数は不問。必ずサブ液晶G数を基準に確認。"}
+    ]
+  },
+  {
+    id:"shin_onimusha3",
+    name:"スマスロ 新鬼武者3",
+    unit:"ゲーム数 / 周期数",
+    avgInvestBase:12500,
+    memo:"新鬼武者3用。ゲーム数天井狙い。周期数ハマりも合わせて判断。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:500},border:{ok:450,plus:400,strong:500},evTable:[{g:0,ev:-1679},{g:50,ev:-1521},{g:100,ev:-1343},{g:150,ev:-1142},{g:200,ev:-916},{g:250,ev:-661},{g:300,ev:-373},{g:350,ev:-49},{g:400,ev:316},{g:450,ev:728},{g:500,ev:1193},{g:550,ev:1717},{g:600,ev:2307},{g:650,ev:2972},{g:700,ev:3722},{g:750,ev:4568},{g:800,ev:5521},{g:850,ev:6596},{g:900,ev:7808},{g:950,ev:9174}],note:"等価では500G〜が期待値1000円超え。400Gから一応プラス。450G付近でも周期数がハマっていれば候補。ゲーム数と周期数を合わせて判断。"}
+    ]
+  },
+  {
+    id:"magireco",
+    name:"Lマギアレコード 魔法少女まどか☆マギカ外伝",
+    unit:"ゲーム数 / pt概算",
+    avgInvestBase:10000,
+    memo:"マギレコ用。天井短縮なし時の暫定期待値。ゲーム数とptの目安は1G=約1.5pt換算。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件・天井短縮なし",aim:{equiv:350},border:{ok:250,plus:250,strong:350},evTable:[{g:0,ev:-1272},{g:50,ev:-1091},{g:100,ev:-872},{g:150,ev:-608},{g:200,ev:-291},{g:250,ev:91},{g:300,ev:551},{g:350,ev:1104},{g:400,ev:1771},{g:450,ev:2574},{g:500,ev:3541},{g:550,ev:4706}],note:"天井短縮なし時の暫定値。等価では250G/375ptから一応プラス、350G/525ptから実戦ライン。"}
+    ]
+  },
+  {
+    id:"to_love_ru_darkness",
+    name:"L ToLOVEる ダークネス",
+    unit:"ゲーム数",
+    avgInvestBase:12000,
+    memo:"ToLOVEるダークネス用。天井短縮なし時のゲーム数天井狙い。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件・天井短縮なし",aim:{equiv:450},evTable:[{g:0,ev:-1268},{g:50,ev:-1133},{g:100,ev:-978},{g:150,ev:-801},{g:200,ev:-600},{g:250,ev:-370},{g:300,ev:-108},{g:350,ev:192},{g:400,ev:533},{g:450,ev:923},{g:500,ev:1368},{g:550,ev:1876},{g:600,ev:2456},{g:650,ev:3117},{g:700,ev:3872},{g:750,ev:4733},{g:800,ev:5716},{g:850,ev:6837},{g:900,ev:8117},{g:950,ev:9578}],note:"天井短縮なし時。等価では450G〜が実戦ライン。500G以降はかなり打ちやすい期待値帯。"}
+    ]
+  },
+  {
+    id:"god_kamigami",
+    name:"L GOD 神々の軌跡",
+    unit:"ゲーム数",
+    avgInvestBase:18000,
+    memo:"GOD神々の軌跡用。通常条件とリセット後を分離。非常に荒い機種のため深め推奨。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:500},border:{ok:350,plus:350,strong:500},evTable:[{g:0,ev:-1093},{g:50,ev:-962},{g:100,ev:-820},{g:150,ev:-664},{g:200,ev:-495},{g:250,ev:-310},{g:300,ev:-109},{g:350,ev:110},{g:400,ev:350},{g:450,ev:611},{g:500,ev:896},{g:510,ev:956},{g:550,ev:1206},{g:600,ev:1545},{g:650,ev:1914},{g:700,ev:2317},{g:750,ev:2756},{g:800,ev:3235},{g:850,ev:3758},{g:900,ev:4327},{g:950,ev:4948},{g:1000,ev:5626},{g:1050,ev:6364},{g:1100,ev:7170},{g:1150,ev:8048},{g:1200,ev:9006},{g:1250,ev:10051},{g:1300,ev:11190},{g:1350,ev:12433},{g:1400,ev:13788},{g:1450,ev:15265}],note:"通常条件。350Gから理論上プラスだが、GOD系は非常に荒いため実戦では500G〜推奨。"},
+      {id:"reset",name:"リセット後",aim:{equiv:0},evTable:[{g:0,ev:246},{g:50,ev:497},{g:100,ev:772},{g:150,ev:1071},{g:200,ev:1398},{g:250,ev:1754},{g:300,ev:2142},{g:350,ev:2565},{g:400,ev:3027},{g:450,ev:3530},{g:500,ev:4079},{g:510,ev:2040},{g:550,ev:2369},{g:600,ev:2812},{g:650,ev:3296},{g:700,ev:3824},{g:750,ev:4400},{g:800,ev:5028},{g:850,ev:5712},{g:900,ev:6459},{g:950,ev:7273},{g:1000,ev:5626},{g:1050,ev:6364},{g:1100,ev:7170},{g:1150,ev:8048},{g:1200,ev:9006},{g:1250,ev:10051},{g:1300,ev:11190},{g:1350,ev:12433},{g:1400,ev:13788},{g:1450,ev:15265}],note:"リセット後。あなたのホールでは基本据え置き寄りなので補助扱い。明確な変更時のみ使用。"}
+    ]
+  },
+  {
+    id:"tekken6",
+    name:"スマスロ 鉄拳6",
+    unit:"ゲーム数",
+    avgInvestBase:11500,
+    memo:"鉄拳6用。通常条件のボーナス天井狙い。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:450},evTable:[{g:0,ev:-1109},{g:50,ev:-983},{g:100,ev:-832},{g:150,ev:-652},{g:200,ev:-437},{g:250,ev:-181},{g:300,ev:124},{g:350,ev:487},{g:400,ev:921},{g:450,ev:1437},{g:500,ev:2053},{g:550,ev:2787},{g:600,ev:3662},{g:650,ev:4704},{g:700,ev:5948}],note:"通常条件。等価では450G〜が期待値1000円超え。300Gから一応プラス。"}
+    ]
+  },
+  {
+    id:"yoshimune",
+    name:"L吉宗",
+    unit:"ゲーム数",
+    avgInvestBase:15000,
+    memo:"吉宗用。ゲーム数天井狙い。投資が重くなりやすいため深め推奨。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:550},border:{ok:500,plus:500,strong:550},evTable:[{g:0,ev:-1588},{g:50,ev:-1442},{g:100,ev:-1277},{g:150,ev:-1091},{g:200,ev:-881},{g:250,ev:-645},{g:300,ev:-379},{g:350,ev:-78},{g:400,ev:261},{g:450,ev:643},{g:500,ev:1074},{g:550,ev:1560},{g:600,ev:2108},{g:650,ev:2726},{g:700,ev:3423},{g:750,ev:4209},{g:800,ev:5095},{g:850,ev:6094},{g:900,ev:7221},{g:950,ev:8491}],note:"通常条件。500Gから期待値1000円超えだが、投資リスクを考えて実戦では550G〜推奨。"}
+    ]
+  },
+  {
+    id:"super_rio_ace2",
+    name:"Lスーパーリオエース2",
+    unit:"ゲーム数 / ボーナススルー回数",
+    avgInvestBase:11500,
+    memo:"スーパーリオエース2用。ゲーム数天井とボーナススルー回数狙いを分離。期待値は暫定版。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:450},evTable:[{g:0,ev:-1474},{g:50,ev:-1307},{g:100,ev:-1111},{g:150,ev:-883},{g:200,ev:-616},{g:250,ev:-305},{g:300,ev:60},{g:350,ev:486},{g:400,ev:984},{g:450,ev:1567},{g:500,ev:2247},{g:550,ev:3043},{g:600,ev:3974},{g:650,ev:5061},{g:700,ev:6332}],note:"現時点では暫定値。等価では450G〜が期待値1000円超え。"},
+      {id:"bonus_skip",name:"ボーナススルー回数狙い",aim:{equiv:7},evTable:[{g:0,ev:-800},{g:1,ev:-700},{g:2,ev:-600},{g:3,ev:-450},{g:4,ev:-250},{g:5,ev:0},{g:6,ev:500},{g:7,ev:1600},{g:8,ev:3000},{g:9,ev:4500}],note:"ボーナススルー回数狙い。7回スルー以降推奨。入力欄にはスルー回数を入れて判定。"}
+    ]
+  },
+  {
+    id:"monkey_turn_v",
+    name:"スマスロ モンキーターンV",
+    unit:"ゲーム数",
+    avgInvestBase:10000,
+    memo:"モンキーターンV用。通常条件のゲーム数天井狙い。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:350},evTable:[{g:0,ev:-600},{g:50,ev:-453},{g:100,ev:-281},{g:150,ev:-81},{g:200,ev:152},{g:250,ev:424},{g:300,ev:740},{g:350,ev:1108},{g:400,ev:1537},{g:450,ev:2036},{g:500,ev:2617},{g:550,ev:3295},{g:600,ev:4084},{g:650,ev:5002},{g:700,ev:6072},{g:750,ev:7319}],note:"通常条件。等価では350G〜が期待値1000円超え。比較的素直に期待値が伸びるタイプ。"}
+    ]
+  },
+  {
+    id:"tokyo_ghoul",
+    name:"スマスロ 東京喰種",
+    unit:"ゲーム数",
+    avgInvestBase:12500,
+    memo:"東京喰種用。AT間天井狙い。AT終了後即ヤメ前提の期待値。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:450},border:{ok:350,plus:350,strong:450},evTable:[{g:0,ev:-815},{g:50,ev:-718},{g:100,ev:-609},{g:150,ev:-486},{g:200,ev:-347},{g:250,ev:-191},{g:300,ev:-14},{g:350,ev:184},{g:400,ev:408},{g:450,ev:661},{g:500,ev:945},{g:550,ev:1266},{g:600,ev:1628},{g:650,ev:2035},{g:700,ev:2495},{g:750,ev:3013},{g:800,ev:3597},{g:850,ev:4255},{g:900,ev:4997},{g:950,ev:5833},{g:1000,ev:6775},{g:1050,ev:7838},{g:1100,ev:9036},{g:1150,ev:10386}],note:"AT間天井狙い。350Gから理論上プラスだが、実戦では450G〜推奨。AT終了後即ヤメ前提。"}
+    ]
+  },
+  {
+    id:"valvrave",
+    name:"スマスロ 革命機ヴァルヴレイヴ",
+    unit:"ゲーム数",
+    avgInvestBase:18000,
+    memo:"VVV初代用。ボーナス間天井狙い。非常に荒い機種なので深め推奨。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:700},evTable:[{g:0,ev:-2005},{g:50,ev:-1885},{g:100,ev:-1753},{g:150,ev:-1609},{g:200,ev:-1451},{g:250,ev:-1279},{g:300,ev:-1090},{g:350,ev:-883},{g:400,ev:-657},{g:450,ev:-410},{g:500,ev:-139},{g:550,ev:157},{g:600,ev:481},{g:650,ev:835},{g:700,ev:1223},{g:750,ev:1648},{g:800,ev:2112},{g:850,ev:2620},{g:900,ev:3175},{g:950,ev:3783},{g:1000,ev:4449},{g:1050,ev:5176},{g:1100,ev:5973},{g:1150,ev:6844},{g:1200,ev:7797},{g:1250,ev:8840},{g:1300,ev:9981},{g:1350,ev:11229},{g:1400,ev:12595},{g:1450,ev:14089}],note:"通常条件。550Gから理論上プラスだが、実戦ラインは700G〜。投資リスクが非常に高いので深め推奨。"}
+    ]
+  },
+  {
+    id:"valvrave2",
+    name:"スマスロ 革命機ヴァルヴレイヴ2",
+    unit:"ゲーム数",
+    avgInvestBase:17000,
+    memo:"VVV2用。ボーナス・AT間天井狙い。投資がかなり重くなりやすい機種なので深め推奨。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:800},evTable:[{g:0,ev:-1454},{g:50,ev:-1373},{g:100,ev:-1284},{g:150,ev:-1186},{g:200,ev:-1078},{g:250,ev:-958},{g:300,ev:-825},{g:350,ev:-679},{g:400,ev:-517},{g:450,ev:-338},{g:500,ev:-141},{g:550,ev:78},{g:600,ev:319},{g:650,ev:586},{g:700,ev:880},{g:750,ev:1206},{g:800,ev:1566},{g:850,ev:1963},{g:900,ev:2403},{g:950,ev:2888},{g:1000,ev:3425},{g:1050,ev:4018},{g:1100,ev:4673},{g:1150,ev:5397},{g:1200,ev:6197},{g:1250,ev:7081},{g:1300,ev:8058},{g:1350,ev:9137},{g:1400,ev:10330},{g:1450,ev:11648}],note:"通常条件。550Gから理論上プラスだが、投資リスクが高いため実戦では800G〜推奨。"}
+    ]
+  },
+  {
+    id:"resident_evil3",
+    name:"スマスロ バイオハザードRE:3",
+    unit:"ゲーム数",
+    avgInvestBase:12500,
+    memo:"RE3用。通常条件と設定変更後を分離。等価交換のみ使用。基本は通常条件メイン。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:400},evTable:[{g:0,ev:-1977},{g:50,ev:-1790},{g:100,ev:-1581},{g:150,ev:-1348},{g:200,ev:-1086},{g:250,ev:-794},{g:300,ev:-467},{g:350,ev:-102},{g:400,ev:307},{g:450,ev:765},{g:500,ev:1277},{g:550,ev:1849},{g:600,ev:2490},{g:650,ev:3206},{g:700,ev:4008},{g:750,ev:4905},{g:800,ev:5908},{g:850,ev:7030},{g:900,ev:8285},{g:950,ev:9689}],note:"通常条件。等価では400G〜がプラス域。500G以降はかなり打ちやすい。"},
+      {id:"reset",name:"設定変更後",aim:{equiv:150},evTable:[{g:0,ev:-1195},{g:50,ev:-747},{g:100,ev:-245},{g:150,ev:316},{g:200,ev:944},{g:250,ev:1646},{g:300,ev:2431},{g:350,ev:3310},{g:400,ev:4293},{g:450,ev:5392},{g:500,ev:6622},{g:550,ev:7998},{g:600,ev:9537}],note:"設定変更後。等価では150G付近からプラス。あなたのホールでは基本使わず、イベントや明確な変更時だけ。"}
+    ]
+  },
+  {
+    id:"resident_evil2",
+    name:"スマスロ バイオハザードRE:2",
+    unit:"ゲーム数 / CZスルー回数",
+    avgInvestBase:12000,
+    memo:"RE2用。通常ゲーム数天井とCZスルー回数を分離。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:500},evTable:[{g:0,ev:-607},{g:50,ev:-509},{g:100,ev:-398},{g:150,ev:-269},{g:200,ev:-122},{g:250,ev:46},{g:300,ev:239},{g:350,ev:460},{g:400,ev:714},{g:450,ev:1004},{g:500,ev:1337},{g:550,ev:1719},{g:600,ev:2156},{g:650,ev:2657},{g:700,ev:3231},{g:750,ev:3889},{g:800,ev:4643},{g:850,ev:5507},{g:900,ev:6497},{g:950,ev:7632}],note:"ゲーム数天井のみ考慮。等価では500G〜が基本ライン。450Gから期待値1000円超え。"},
+      {id:"cz_skip",name:"CZスルー回数狙い",aim:{equiv:3},evTable:[{g:0,ev:-500},{g:1,ev:-250},{g:2,ev:0},{g:3,ev:1400},{g:4,ev:2600},{g:5,ev:4200}],note:"CZ3スルー（4回目CZ優遇）を狙う状態。3スルーならゲーム数が浅くても候補。入力欄にはCZスルー回数を入れて判定。"}
+    ]
+  },
+  {
+    id:"sengoku_otome4",
+    name:"L戦国乙女4 戦乱に閃く炯眼の軍師",
+    unit:"ゲーム数",
+    avgInvestBase:11000,
+    memo:"戦国乙女4用。通常条件のゲーム数天井狙い。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:400},evTable:[{g:0,ev:-462},{g:50,ev:-353},{g:100,ev:-223},{g:150,ev:-68},{g:200,ev:115},{g:250,ev:333},{g:300,ev:592},{g:350,ev:899},{g:400,ev:1264},{g:450,ev:1698},{g:500,ev:2213},{g:550,ev:2825},{g:600,ev:3552},{g:650,ev:4415},{g:700,ev:5441}],note:"等価では400Gからが実戦ライン。200Gから一応プラスだが浅め。"}
+    ]
+  },
+  {
+    id:"tokyo_revengers",
+    name:"スマスロ 東京リベンジャーズ",
+    unit:"ゲーム数 / STスルー回数",
+    avgInvestBase:13000,
+    memo:"東リベ用。通常条件のゲーム数天井とSTスルー回数狙いを分離。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:450},evTable:[{g:0,ev:-1436},{g:50,ev:-1235},{g:100,ev:-1015},{g:150,ev:-774},{g:200,ev:-510},{g:250,ev:-220},{g:300,ev:99},{g:350,ev:447},{g:400,ev:830},{g:450,ev:1249},{g:500,ev:1709},{g:550,ev:2214},{g:600,ev:2767},{g:650,ev:3373},{g:700,ev:4039},{g:750,ev:4768},{g:800,ev:5568},{g:850,ev:6445},{g:900,ev:7407},{g:950,ev:8462},{g:1000,ev:9619},{g:1050,ev:10888},{g:1100,ev:12279},{g:1150,ev:13804}],note:"通常条件。等価では450Gから期待値1000円超え。"},
+      {id:"st_skip",name:"STスルー回数狙い",aim:{equiv:3},evTable:[{g:0,ev:-600},{g:1,ev:-300},{g:2,ev:0},{g:3,ev:1200},{g:4,ev:2400},{g:5,ev:3800}],note:"STスルー回数狙い。実戦上の目安は3スルーから。入力欄にはスルー回数を入れて判定。"}
+    ]
+  },
+  {
+    id:"hokuto_smart",
+    name:"スマスロ北斗の拳",
+    unit:"ゲーム数",
+    avgInvestBase:12000,
+    memo:"天井短縮なし時、天井1268G+αの通常天井狙い用。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件・天井短縮なし",aim:{equiv:400},border:{ok:400,plus:500,strong:650},evTable:[{g:0,ev:-996},{g:50,ev:-936},{g:100,ev:-867},{g:150,ev:-789},{g:200,ev:-700},{g:250,ev:-600},{g:300,ev:-486},{g:350,ev:-357},{g:400,ev:-211},{g:450,ev:-45},{g:500,ev:143},{g:550,ev:357},{g:600,ev:598},{g:650,ev:873},{g:700,ev:1183},{g:750,ev:1536},{g:1000,ev:4145},{g:1050,ev:4893},{g:1100,ev:5742},{g:1150,ev:6705}],note:"スマスロ北斗だけ400G〜をギリ候補扱い。500G〜で理論上プラス、650G〜が本来の実戦ライン。400〜499Gは宵越し・閉店時間・店のクセ・他に拾える台がない時だけ。"}
+    ]
+  },
+  {
+    id:"hokuto_tensei2",
+    name:"スマスロ北斗の拳 転生の章2",
+    unit:"ゲーム数 / あべし概算",
+    avgInvestBase:13000,
+    memo:"通常条件・天井短縮なし用。あべしが見えない宵越しでは、データランプG数をそのまま合算して概算判定する。実際は1Gあたり約1.5あべし目安なので、液晶あべしが見えるなら液晶優先。",
+    states:[
+      {id:"normal",name:"通常条件・天井短縮なし",aim:{equiv:350},evTable:[{g:0,ev:-1332},{g:50,ev:-1185},{g:100,ev:-1019},{g:150,ev:-830},{g:200,ev:-616},{g:250,ev:-373},{g:300,ev:-98},{g:350,ev:214},{g:400,ev:568},{g:450,ev:969},{g:500,ev:1424},{g:550,ev:1940},{g:600,ev:2526},{g:650,ev:3189},{g:700,ev:3941},{g:750,ev:4795},{g:800,ev:5762},{g:850,ev:6859},{g:900,ev:8103},{g:950,ev:9514}],note:"等価では350G付近からプラス。5.6枚交換の数値は使わず、等価のみで判定。天井短縮なし前提。"}
+    ]
+  },
+  {
+    id:"kabaneri2_unato",
+    name:"スマスロ甲鉄城のカバネリ 海門決戦",
+    unit:"ゲーム数",
+    avgInvestBase:12000,
+    memo:"カバネリ2用。通常条件と天井短縮を分離。期待値は暫定版の等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"通常条件",aim:{equiv:400},evTable:[{g:0,ev:-1564},{g:50,ev:-1347},{g:100,ev:-1106},{g:150,ev:-840},{g:200,ev:-544},{g:250,ev:-215},{g:300,ev:149},{g:350,ev:552},{g:400,ev:1000},{g:450,ev:1496},{g:500,ev:2046},{g:550,ev:2656},{g:600,ev:3333},{g:650,ev:4083},{g:700,ev:4915},{g:750,ev:5838},{g:800,ev:6861},{g:850,ev:7995},{g:900,ev:9253},{g:950,ev:10648}],note:"通常条件。等価では400Gから期待値1000円超え。暫定版データなので更新情報があれば差し替え。"},
+      {id:"short",name:"天井短縮",aim:{equiv:0},evTable:[{g:0,ev:1000},{g:50,ev:1496},{g:100,ev:2046},{g:150,ev:2656},{g:200,ev:3333},{g:250,ev:4083},{g:300,ev:4915},{g:350,ev:5838},{g:400,ev:6861},{g:450,ev:7995},{g:500,ev:9253},{g:550,ev:10648}],note:"天井短縮時。等価なら0Gから期待値1000円超え。短縮根拠がある場合のみ選択。"}
+    ]
+  },
+  {
+    id:"kabaneri_medal",
+    name:"甲鉄城のカバネリ（メダル機）",
+    unit:"ゲーム数 / STスルー回数",
+    avgInvestBase:10000,
+    memo:"メダル機カバネリ用。短縮なし1000G天井、天井短縮650G天井、STスルー回数狙いを分離。等価交換のみ使用。",
+    states:[
+      {id:"normal",name:"短縮なし・1000G天井",aim:{equiv:400},evTable:[{g:0,ev:-811},{g:50,ev:-629},{g:100,ev:-426},{g:150,ev:-200},{g:200,ev:52},{g:250,ev:333},{g:300,ev:647},{g:350,ev:996},{g:400,ev:1386},{g:450,ev:1820},{g:500,ev:2305},{g:550,ev:2845},{g:600,ev:3446},{g:650,ev:4118},{g:700,ev:4866},{g:750,ev:5700},{g:800,ev:6630},{g:850,ev:7667},{g:900,ev:8824},{g:950,ev:10113}],note:"短縮なし1000G天井。等価では200Gから一応プラスだが、ざっくり400G付近からが実戦ライン。"},
+      {id:"short",name:"天井短縮・650G天井",aim:{equiv:0},evTable:[{g:0,ev:996},{g:50,ev:1386},{g:100,ev:1820},{g:150,ev:2305},{g:200,ev:2845},{g:250,ev:3446},{g:300,ev:4118},{g:350,ev:4866},{g:400,ev:5700},{g:450,ev:6630},{g:500,ev:7667},{g:550,ev:8824},{g:600,ev:10113}],note:"天井短縮650G天井。等価なら0Gからプラス。短縮根拠がある時のみ選択。"},
+      {id:"st_skip",name:"STスルー回数狙い",aim:{equiv:3},evTable:[{g:0,ev:-500},{g:1,ev:-300},{g:2,ev:0},{g:3,ev:1200},{g:4,ev:2200},{g:5,ev:3500}],note:"STスルー回数狙い。狙い目は3スルーから。入力欄にはスルー回数を入れて判定。"}
+    ]
+  },
+  {
+    id:"godeater_resurrection",
+    name:"スマスロ ゴッドイーター リザレクション",
+    unit:"ゲーム数",
+    avgInvestBase:14000,
+    memo:"ゴッドイーター用。天井短縮なし/短縮ありを分離。期待値は暫定版。等価交換のみ使用。有利区間や機械割の影響でゾーン当選にブレが出る可能性あり。",
+    states:[
+      {id:"normal",name:"天井短縮なし",aim:{equiv:500},evTable:[{g:0,ev:-1235},{g:50,ev:-1105},{g:100,ev:-956},{g:150,ev:-786},{g:200,ev:-591},{g:250,ev:-370},{g:300,ev:-117},{g:350,ev:172},{g:400,ev:501},{g:450,ev:877},{g:500,ev:1306},{g:550,ev:1795},{g:600,ev:2354},{g:650,ev:2992},{g:700,ev:3720},{g:750,ev:4550},{g:800,ev:5498},{g:850,ev:6580},{g:900,ev:7815},{g:950,ev:9224}],note:"天井短縮なし。等価では500G〜が実戦ライン。350Gから一応プラスだが浅め。"},
+      {id:"short",name:"天井短縮あり",aim:{equiv:200},evTable:[{g:0,ev:-650},{g:50,ev:-232},{g:100,ev:244},{g:150,ev:789},{g:200,ev:1410},{g:250,ev:2118},{g:300,ev:2927},{g:350,ev:3850},{g:400,ev:4904},{g:450,ev:6106},{g:500,ev:7479},{g:550,ev:9045}],note:"天井短縮あり。等価では200G〜が実戦ライン。100Gから一応プラス。短縮根拠が弱いなら通常扱い。"}
+    ]
+  }
+];
+
+let machines=JSON.parse(localStorage.getItem('slotEvMachinesV2')||'null')||defaultMachines;
+let histories=JSON.parse(localStorage.getItem('slotEvHistoriesV2')||'[]');
+let settings=JSON.parse(localStorage.getItem('slotEvSettingsV2')||'null')||{sLine:3000,aLine:1500,bLine:500,riskLine:15000};
+let lastJudge=null;
+const $=id=>document.getElementById(id); const yen=n=>Math.round(n).toLocaleString('ja-JP')+'円';
+function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',1600)}
+function init(){document.querySelectorAll('.tabBtn').forEach(btn=>btn.addEventListener('click',()=>showTab(btn.dataset.tab)));$('machineSelect').addEventListener('change',renderStateSelect);$('stateSelect').addEventListener('change',renderMemo);$('sLine').value=settings.sLine;$('aLine').value=settings.aLine;$('bLine').value=settings.bLine;$('riskLine').value=settings.riskLine;renderMachineSelect();renderHistory();renderMachineJson()}
+function showTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));document.querySelectorAll('.tabBtn').forEach(b=>b.classList.remove('active'));$(id).classList.remove('hidden');document.querySelector(`[data-tab="${id}"]`).classList.add('active');if(id==='machine')renderMachineJson()}
+function renderMachineSelect(){$('machineSelect').innerHTML=machines.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');renderStateSelect()}
+function currentMachine(){return machines.find(m=>m.id===$('machineSelect').value)||machines[0]} function currentState(){const m=currentMachine();return m.states.find(s=>s.id===$('stateSelect').value)||m.states[0]}
+function renderStateSelect(){const m=currentMachine();$('stateSelect').innerHTML=m.states.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');renderMemo()}
+function renderMemo(){const m=currentMachine(),s=currentState();$('machineMemo').innerHTML=`<div class="row"><span class="pill">単位: ${m.unit}</span><span class="pill">状態: ${s.name}</span><span class="pill">等価専用</span></div><p>${m.memo}</p><p>${s.note}</p>`}
+function interpolateEV(table,g){const rows=[...table].sort((a,b)=>a.g-b.g);if(g<=rows[0].g)return rows[0].ev;if(g>=rows[rows.length-1].g)return rows[rows.length-1].ev;for(let i=0;i<rows.length-1;i++){const a=rows[i],b=rows[i+1];if(g>=a.g&&g<=b.g){const r=(g-a.g)/(b.g-a.g);return a.ev+(b.ev-a.ev)*r}}return 0}
+function estimateRisk(g,state){const rows=[...state.evTable].sort((a,b)=>a.g-b.g);const maxG=rows[rows.length-1].g;const remainRatio=Math.max(0,(maxG-g)/maxG);const base=currentMachine().avgInvestBase||12000;return base*(0.35+remainRatio*0.9)}
+function rankFromEv(ev,g,state,machine){
+  if(machine?.id==='hokuto_smart' && state?.id==='normal' && g>=400 && g<500){
+    return {rank:'ギリOK',cls:'warn',text:'スマスロ北斗専用の薄めライン。期待値は弱いが、宵越し・他に打つ台なし・時間に余裕ありなら候補。'};
+  }
+  if(ev>=settings.sLine)return{rank:'S',cls:'good',text:'期待値かなり強い。優先して打ちたい。'};
+  if(ev>=settings.aLine)return{rank:'A',cls:'good',text:'期待値あり。条件が合うなら打てる。'};
+  if(ev>=settings.bLine)return{rank:'B',cls:'warn',text:'一応プラス圏。ただし閉店時間・天井短縮根拠に注意。'};
+  if(ev>=0)return{rank:'C',cls:'warn',text:'微プラス〜トントン寄り。無理に打つほどではない。'};
+  return{rank:'見送り',cls:'bad',text:'期待値不足。今は触らない方が安全。'}
+}
+function judgeEV(){const todayG=Number($('currentGame').value);const prevG=Number($('prevGame').value||0);if(Number.isNaN(todayG)||todayG<0){toast('当日現在Gを入れてください');return}let g=$('carryoverMode').value==='carry'?todayG+prevG:todayG;const m=currentMachine(),s=currentState();let rawEv=interpolateEV(s.evTable,g);let safePenalty=0;if($('lampMode').value==='safe'){safePenalty=Math.max(300,rawEv*0.15);rawEv-=safePenalty}const risk=estimateRisk(g,s);const r=rankFromEv(rawEv,g,s,m);const aim=s.aim?.equiv??0;const riskWarn=risk>=settings.riskLine?`<span class="danger">平均投資が重め。所持金が薄い日は危険。</span>`:`<span class="positive">投資リスクは許容範囲寄り。</span>`;const below=g<aim?`狙い目ライン${aim}Gより浅いので慎重。`:`狙い目ライン${aim}G以上。`;lastJudge={date:new Date().toISOString(),machine:m.name,state:s.name,game:g,ev:Math.round(rawEv),risk:Math.round(risk),memo:s.note};$('resultBox').innerHTML=`<div class="rank ${r.cls}">${r.rank}</div><div class="ev">推定期待値：${yen(rawEv)}</div><div class="row" style="margin-top:10px"><span class="pill">判定G ${g}G</span><span class="pill">当日 ${todayG}G</span><span class="pill">前日 ${prevG}G</span><span class="pill">平均投資目安 ${yen(risk)}</span>${safePenalty?`<span class="pill">安全補正 -${yen(safePenalty)}</span>`:''}</div><div class="comment">${r.text}<br>${below}<br>${riskWarn}<br><br>押し引き：S/Aは候補、Bは時間・短縮根拠ありなら可、C以下は基本見送り。</div>`}
+function saveCandidate(){if(!lastJudge){judgeEV();if(!lastJudge)return}histories.unshift({...lastJudge,type:'候補',invest:0,ret:0,profit:0,earnedEv:0});persist();renderHistory();toast('候補に保存しました')}
+function saveEarnedEV(){if(!lastJudge){judgeEV();if(!lastJudge)return}histories.unshift({...lastJudge,type:'期待値',invest:0,ret:0,profit:0,earnedEv:lastJudge.ev});persist();renderHistory();toast('稼いだ期待値として記録しました')}
+function addHistory(){const invest=Number($('investYen').value||0),ret=Number($('returnYen').value||0);histories.unshift({date:new Date().toISOString(),type:'稼働',machine:$('playMachine').value||'未入力',state:'',game:Number($('startG').value||0),endGame:Number($('endG').value||0),invest,ret,profit:ret-invest,memo:$('playMemo').value||''});persist();renderHistory();toast('履歴を追加しました')}
+function renderHistory(){
+  const total=histories.reduce((a,h)=>a+(h.profit||0),0);
+  const earnedTotal=histories.reduce((a,h)=>a+(h.earnedEv||0),0);
+  const plays=histories.filter(h=>h.type==='稼働').length;
+  const evPlays=histories.filter(h=>h.type==='期待値').length;
+  const avg=plays?total/plays:0;
+  const evAvg=evPlays?earnedTotal/evPlays:0;
+  $('summary').innerHTML=`<span class="pill">稼働 ${plays}件</span><span class="pill">累計収支 ${yen(total)}</span><span class="pill">平均収支 ${yen(avg)}</span><span class="pill">稼いだ期待値 ${yen(earnedTotal)}</span><span class="pill">平均EV ${yen(evAvg)}</span>`;
+  $('evSummary').innerHTML=`期待値記録は「実際に打った台の理論上積めた期待値」を残す欄。収支が荒れても、長期で期待値を積めているか確認できます。`;
+  if(!histories.length){$('historyTable').innerHTML='<div class="small">まだ履歴がありません。</div>';return}
+  $('historyTable').innerHTML=`<table><thead><tr><th>日付</th><th>種別</th><th>機種</th><th class="right">G</th><th class="right">EV/収支</th><th>メモ</th><th></th></tr></thead><tbody>`+histories.map((h,i)=>{
+    const d=new Date(h.date).toLocaleString('ja-JP',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const val=h.type==='稼働'?h.profit:(h.type==='期待値'?h.earnedEv:h.ev);
+    const label=h.type==='期待値'?'EV':(h.type==='稼働'?'収支':'候補EV');
+    return`<tr><td>${d}</td><td>${h.type}</td><td>${h.machine}<br><span class="small">${h.state||''}</span></td><td class="right">${h.game||0}</td><td class="right ${val>=0?'positive':'danger'}">${label}: ${yen(val||0)}</td><td>${h.memo||''}</td><td><button class="btnMini btnDanger" onclick="delHistory(${i})">削除</button></td></tr>`
+  }).join('')+`</tbody></table>`
+}
+function delHistory(i){histories.splice(i,1);persist();renderHistory()}
+function renderMachineJson(){$('machineJson').value=JSON.stringify(machines,null,2)}
+function saveMachineJson(){try{machines=JSON.parse($('machineJson').value);persist();renderMachineSelect();toast('機種データを保存しました')}catch(e){toast('JSON形式が正しくありません')}}
+function resetMachines(){machines=structuredClone(defaultMachines);persist();renderMachineSelect();renderMachineJson();toast('初期データに戻しました')}
+function saveSettings(){settings={sLine:Number($('sLine').value),aLine:Number($('aLine').value),bLine:Number($('bLine').value),riskLine:Number($('riskLine').value)};persist();toast('設定を保存しました')}
+function persist(){localStorage.setItem('slotEvMachinesV2',JSON.stringify(machines));localStorage.setItem('slotEvHistoriesV2',JSON.stringify(histories));localStorage.setItem('slotEvSettingsV2',JSON.stringify(settings))}
+function exportData(){const data={machines,histories,settings,exportedAt:new Date().toISOString()};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='slot-ev-assist-backup.json';a.click();URL.revokeObjectURL(a.href)}
+function importData(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);machines=data.machines||machines;histories=data.histories||histories;settings=data.settings||settings;persist();init();toast('読み込み完了')}catch(err){toast('読み込み失敗')}};reader.readAsText(file)}
+init();
+</script>
+</body>
+</html>
