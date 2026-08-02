@@ -347,7 +347,16 @@ for (const [machineId, states] of Object.entries(DETAILED_MACHINE_TABLES)) {
 }
 
 const clone=x=>JSON.parse(JSON.stringify(x));
-let machines=JSON.parse(localStorage.getItem('slotEvMachinesV2')||'null')||clone(defaultMachines);
+// アップデート時にスマホ側の古いlocalStorageが新機種を隠さないよう、
+// 最新の初期機種データを優先しつつ、ユーザー追加機種だけ引き継ぐ。
+function mergeMachinesWithDefaults(savedMachines){
+  if(!Array.isArray(savedMachines)) return clone(defaultMachines);
+  const defaultIds=new Set(defaultMachines.map(m=>m.id));
+  const customMachines=savedMachines.filter(m=>m&&m.id&&!defaultIds.has(m.id));
+  return [...clone(defaultMachines),...clone(customMachines)];
+}
+const savedMachines=JSON.parse(localStorage.getItem('slotEvMachinesV2')||'null');
+let machines=mergeMachinesWithDefaults(savedMachines);
 let histories=JSON.parse(localStorage.getItem('slotEvHistoriesV2')||'[]');
 let settings=JSON.parse(localStorage.getItem('slotEvSettingsV2')||'null')||{riskLine:15000,defaultExchange:'equiv',evPeriodDisplay:'all'};
 let favorites=JSON.parse(localStorage.getItem('slotEvFavoritesV2')||'[]');
@@ -446,5 +455,5 @@ function saveSettings(){settings={...settings,defaultExchange:$('defaultExchange
 function persist(){localStorage.setItem('slotEvMachinesV2',JSON.stringify(machines));localStorage.setItem('slotEvHistoriesV2',JSON.stringify(histories));localStorage.setItem('slotEvSettingsV2',JSON.stringify(settings));localStorage.setItem('slotEvFavoritesV2',JSON.stringify(favorites));localStorage.setItem('slotEvRecentV2',JSON.stringify(recent));localStorage.setItem('slotEvInputHistoryV2',JSON.stringify(inputHistory))}
 function exportData(){const data={schemaVersion:SCHEMA_VERSION,machines,histories,settings,favorites,recent,inputHistory,exportedAt:new Date().toISOString()};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='slot-ev-assist-v2-backup.json';a.click();URL.revokeObjectURL(a.href)}
 function migrate(data){if(data.schemaVersion>=2)return data;return{schemaVersion:2,machines:data.machines||machines,histories:data.histories||data.history||[],settings:{...settings,...(data.settings||{})},favorites:data.favorites||[],recent:data.recent||[],inputHistory:data.inputHistory||[]}}
-function importData(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=migrate(JSON.parse(r.result));machines=d.machines||machines;histories=d.histories||histories;settings=d.settings||settings;favorites=d.favorites||favorites;recent=d.recent||recent;inputHistory=d.inputHistory||inputHistory;persist();init();toast('読み込み完了')}catch(err){toast('読み込み失敗')}};r.readAsText(f)}
-init();</script></body></html>
+function importData(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=migrate(JSON.parse(r.result));machines=mergeMachinesWithDefaults(d.machines);histories=d.histories||histories;settings=d.settings||settings;favorites=d.favorites||favorites;recent=d.recent||recent;inputHistory=d.inputHistory||inputHistory;persist();init();toast('読み込み完了')}catch(err){toast('読み込み失敗')}};r.readAsText(f)}
+persist();init();</script></body></html>
